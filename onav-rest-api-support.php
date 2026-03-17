@@ -2,8 +2,8 @@
 /**
  * Plugin Name: OneNav REST API Meta Fields Support
  * Plugin URI: https://warpnav.com/
- * Description: 为 OneNav 主题的 sites 自定义文章类型提供自定义字段（meta）的 REST API 读写支持。
- * Version: 1.1.2
+ * Description: 为 OneNav 主题的所有自定义文章类型和分类法提供完整的自定义字段（meta）REST API 读写支持，并提供后台开关控制。
+ * Version: 2.1.1
  * Author: WarpNav
  * Author URI: https://warpnav.com/
  * Text Domain: onav-rest-api
@@ -16,190 +16,484 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-/**
- * 注册需要在 REST API 中暴露的自定义字段
- */
-add_action('rest_api_init', 'onav_register_rest_meta_fields');
+//======================================================================
+// 1. 注册 REST API 路由和字段
+//======================================================================
 
-function onav_register_rest_meta_fields() {
-    // 为 sites 自定义文章类型注册字段
-    register_rest_field('sites', 'onav_meta', array(
-        'get_callback' => 'onav_get_meta_callback',
-        'update_callback' => 'onav_update_meta_callback',
-        'schema' => null,
-    ));
-    
-    // 为 post 普通文章类型注册字段
-    register_rest_field('post', 'onav_meta', array(
-        'get_callback' => 'onav_get_meta_callback',
-        'update_callback' => 'onav_update_meta_callback',
-        'schema' => null,
-    ));
-}
+add_action('rest_api_init', 'onav_register_rest_routes');
 
 /**
- * 获取 meta 字段的回调函数
+ * 注册 REST API 路由和字段
  */
-function onav_get_meta_callback($post) {
-    $post_id = $post['id'];
-    $meta_fields = array(
-        '_sites_link',
-        '_sites_sescribe',
-        '_sites_language',
-        '_sites_country',
-        '_sites_preview',
-        '_seo_metakey',
-        '_seo_title',
-        '_seo_desc',
-        '_thumbnail',
-    );
+function onav_register_rest_routes() {
+    $config = onav_get_api_meta_config();
+    $options = get_option('onav_rest_api_settings');
 
-    $meta = array();
-    foreach ($meta_fields as $field) {
-        $value = get_post_meta($post_id, $field, true);
-        if ($value) {
-            $meta[$field] = $value;
+    // 获取启用的文章类型，如果未设置则默认全部启用
+    $enabled_post_types = isset($options['enabled_post_types']) 
+        ? $options['enabled_post_types'] 
+        : array_keys($config['post_types']);
+
+    // 获取启用的分类法，如果未设置则默认全部启用
+    $enabled_taxonomies = isset($options['enabled_taxonomies']) 
+        ? $options['enabled_taxonomies'] 
+        : array_keys($config['taxonomies']);
+
+    // 1. 根据设置注册文章类型的 meta 字段
+    foreach ($enabled_post_types as $post_type) {
+        if (isset($config['post_types'][$post_type])) {
+            register_rest_field($post_type, 'onav_meta', [
+                'get_callback'    => 'onav_get_post_meta_callback',
+                'update_callback' => 'onav_update_post_meta_callback',
+                'schema'          => null,
+            ]);
         }
     }
 
+    // 2. 根据设置注册分类法的 meta 字段
+    foreach ($enabled_taxonomies as $taxonomy) {
+        if (isset($config['taxonomies'][$taxonomy])) {
+            register_rest_field($taxonomy, 'onav_meta', [
+                'get_callback'    => 'onav_get_term_meta_callback',
+                'update_callback' => 'onav_update_term_meta_callback',
+                'schema'          => null,
+            ]);
+        }
+    }
+}
+
+//======================================================================
+// 2. 字段配置中心
+//======================================================================
+
+/**
+ * 集中管理所有需要通过 API 暴露的字段配置
+ * 'type' 支持: string, url, textarea, integer, boolean, array, object
+ */
+function onav_get_api_meta_config() {
+    return [
+        // 文章类型字段
+        'post_types' => [
+            'post' => [
+                '_seo_title'    => ['type' => 'string'],
+                '_seo_metakey'  => ['type' => 'string'],
+                '_seo_desc'     => ['type' => 'textarea'],
+                '_thumbnail'    => ['type' => 'string'],
+                'views'         => ['type' => 'integer'],
+                '_like_count'   => ['type' => 'integer'],
+            ],
+            'page' => [
+                '_seo_title'    => ['type' => 'string'],
+                '_seo_metakey'  => ['type' => 'string'],
+                '_seo_desc'     => ['type' => 'textarea'],
+                '_thumbnail'    => ['type' => 'string'],
+                'views'         => ['type' => 'integer'],
+                '_like_count'   => ['type' => 'integer'],
+            ],
+            'sites' => [
+                '_sites_link'         => ['type' => 'url'],
+                '_sites_sescribe'     => ['type' => 'textarea'],
+                '_sites_language'     => ['type' => 'string'],
+                '_sites_country'      => ['type' => 'string'],
+                '_sites_preview'      => ['type' => 'url'],
+                '_thumbnail'          => ['type' => 'string'],
+                '_seo_title'          => ['type' => 'string'],
+                '_seo_metakey'        => ['type' => 'string'],
+                '_seo_desc'           => ['type' => 'textarea'],
+                '_sites_order'        => ['type' => 'integer'],
+                '_sites_type'         => ['type' => 'string'],
+                '_wechat_id'          => ['type' => 'string'],
+                '_is_min_app'         => ['type' => 'boolean'],
+                '_goto'               => ['type' => 'boolean'],
+                '_nofollow'           => ['type' => 'boolean'],
+                '_spare_sites_link'   => ['type' => 'array'],
+                'views'               => ['type' => 'integer'],
+                '_like_count'         => ['type' => 'integer'],
+            ],
+            'app' => [
+                '_app_type'       => ['type' => 'string'],
+                '_app_name'       => ['type' => 'string'],
+                '_app_sescribe'   => ['type' => 'textarea'],
+                '_app_ico'        => ['type' => 'string'],
+                '_app_platform'   => ['type' => 'array'],
+                '_down_formal'    => ['type' => 'url'],
+                '_screenshot'     => ['type' => 'array'],
+                '_down_default'   => ['type' => 'object'],
+                'app_down_list'   => ['type' => 'array'],
+                '_seo_title'      => ['type' => 'string'],
+                '_seo_metakey'    => ['type' => 'string'],
+                '_seo_desc'       => ['type' => 'textarea'],
+                'views'           => ['type' => 'integer'],
+                '_like_count'     => ['type' => 'integer'],
+                '_down_count'     => ['type' => 'integer'],
+            ],
+            'book' => [
+                '_book_type'    => ['type' => 'string'],
+                '_thumbnail'    => ['type' => 'string'],
+                '_summary'      => ['type' => 'textarea'],
+                '_journal'      => ['type' => 'string'],
+                '_score_type'   => ['type' => 'string'],
+                '_score'        => ['type' => 'string'],
+                '_books_data'   => ['type' => 'array'],
+                '_buy_list'     => ['type' => 'array'],
+                '_down_list'    => ['type' => 'array'],
+                '_seo_title'    => ['type' => 'string'],
+                '_seo_metakey'  => ['type' => 'string'],
+                '_seo_desc'     => ['type' => 'textarea'],
+                'views'         => ['type' => 'integer'],
+                '_like_count'   => ['type' => 'integer'],
+            ],
+            'bulletin' => [
+                '_goto'         => ['type' => 'url'],
+                '_is_go'        => ['type' => 'boolean'],
+                '_nofollow'     => ['type' => 'boolean'],
+                '_seo_title'    => ['type' => 'string'],
+                '_seo_metakey'  => ['type' => 'string'],
+                '_seo_desc'     => ['type' => 'textarea'],
+                'views'         => ['type' => 'integer'],
+                '_like_count'   => ['type' => 'integer'],
+            ],
+        ],
+        // 分类法字段
+        'taxonomies' => [
+            'category'  => [
+                'seo_title'   => ['type' => 'string'],
+                'seo_metakey' => ['type' => 'string'],
+                'seo_desc'    => ['type' => 'textarea'],
+                'thumbnail'   => ['type' => 'string'],
+                'card_mode'   => ['type' => 'string'],
+                'columns'     => ['type' => 'object'],
+            ],
+            'post_tag'  => [
+                'seo_title'   => ['type' => 'string'],
+                'seo_metakey' => ['type' => 'string'],
+                'seo_desc'    => ['type' => 'textarea'],
+            ],
+            'favorites' => [
+                'seo_title'   => ['type' => 'string'],
+                'seo_metakey' => ['type' => 'string'],
+                'seo_desc'    => ['type' => 'textarea'],
+                'thumbnail'   => ['type' => 'string'],
+                'card_mode'   => ['type' => 'string'],
+                'columns'     => ['type' => 'object'],
+            ],
+            'sitetag'   => [
+                'seo_title'   => ['type' => 'string'],
+                'seo_metakey' => ['type' => 'string'],
+                'seo_desc'    => ['type' => 'textarea'],
+            ],
+            'apps'      => [
+                'seo_title'   => ['type' => 'string'],
+                'seo_metakey' => ['type' => 'string'],
+                'seo_desc'    => ['type' => 'textarea'],
+                'thumbnail'   => ['type' => 'string'],
+                'card_mode'   => ['type' => 'string'],
+                'columns'     => ['type' => 'object'],
+            ],
+            'apptag'    => [
+                'seo_title'   => ['type' => 'string'],
+                'seo_metakey' => ['type' => 'string'],
+                'seo_desc'    => ['type' => 'textarea'],
+            ],
+            'books'     => [
+                'seo_title'   => ['type' => 'string'],
+                'seo_metakey' => ['type' => 'string'],
+                'seo_desc'    => ['type' => 'textarea'],
+                'thumbnail'   => ['type' => 'string'],
+                'card_mode'   => ['type' => 'string'],
+                'columns'     => ['type' => 'object'],
+            ],
+            'booktag'   => [
+                'seo_title'   => ['type' => 'string'],
+                'seo_metakey' => ['type' => 'string'],
+                'seo_desc'    => ['type' => 'textarea'],
+            ],
+            'series'    => [
+                'seo_title'   => ['type' => 'string'],
+                'seo_metakey' => ['type' => 'string'],
+                'seo_desc'    => ['type' => 'textarea'],
+            ],
+        ],
+    ];
+}
+
+//======================================================================
+// 3. API 回调函数 (GET, UPDATE)
+//======================================================================
+
+/**
+ * GET 回调: 获取文章 meta
+ */
+function onav_get_post_meta_callback($post) {
+    $post_id = $post['id'];
+    $post_type = $post['type'];
+    $config = onav_get_api_meta_config();
+    $allowed_fields = isset($config['post_types'][$post_type]) ? $config['post_types'][$post_type] : [];
+
+    $meta = [];
+    foreach (array_keys($allowed_fields) as $field) {
+        $value = get_post_meta($post_id, $field, true);
+        $meta[$field] = $value;
+    }
     return $meta;
 }
 
 /**
- * 更新 meta 字段的回调函数
+ * UPDATE 回调: 更新文章 meta
  */
-function onav_update_meta_callback($value, $post, $key) {
+function onav_update_post_meta_callback($value, $post, $key) {
     if (!current_user_can('edit_post', $post->ID)) {
-        return new WP_Error(
-            'rest_forbidden_meta',
-            __('Sorry, you are not allowed to update meta fields.', 'onav-rest-api'),
-            array('status' => 403)
-        );
+        return new WP_Error('rest_forbidden_context', __('Sorry, you are not allowed to edit this post.', 'onav-rest-api'), ['status' => 403]);
     }
 
-    // 允许更新多个字段
-    if (is_array($value)) {
-        foreach ($value as $field => $field_value) {
-            if (in_array($field, array_keys(onav_get_allowed_meta_fields()))) {
-                update_post_meta($post->ID, $field, sanitize_text_field($field_value));
-            }
+    if (!is_array($value)) {
+        return new WP_Error('rest_invalid_data', __('Invalid data format. Expecting an object of meta fields.', 'onav-rest-api'), ['status' => 400]);
+    }
+
+    $config = onav_get_api_meta_config();
+    $allowed_fields = isset($config['post_types'][$post->post_type]) ? $config['post_types'][$post->post_type] : [];
+
+    foreach ($value as $field_key => $field_value) {
+        if (array_key_exists($field_key, $allowed_fields)) {
+            $field_config = $allowed_fields[$field_key];
+            $sanitized_value = onav_sanitize_meta_value($field_value, $field_config);
+            update_post_meta($post->ID, $field_key, $sanitized_value);
         }
-        return true;
     }
 
-    // 单个字段更新
-    if (in_array($key, array_keys(onav_get_allowed_meta_fields()))) {
-        return update_post_meta($post->ID, $key, sanitize_text_field($value));
-    }
-
-    return false;
+    return true;
 }
 
 /**
- * 获取允许的 meta 字段列表
+ * GET 回调: 获取分类/标签 meta (已修复, 支持序列化)
  */
-function onav_get_allowed_meta_fields() {
-    return array(
-        '_sites_link' => 'Sites Link URL',
-        '_sites_sescribe' => 'Sites Short Description',
-        '_sites_language' => 'Sites Language',
-        '_sites_country' => 'Sites Country',
-        '_sites_preview' => 'Sites Preview Image',
-        '_seo_metakey' => 'SEO Meta Keywords',
-        '_seo_title' => 'SEO Title',
-        '_seo_desc' => 'SEO Description',
-        '_thumbnail' => 'Featured Image ID',
+function onav_get_term_meta_callback($term) {
+    $term_id = $term['id'];
+    $taxonomy = $term['taxonomy'];
+
+    $seo_meta_key = 'term_io_seo';
+    $display_meta_key = 'term_io_' . $taxonomy;
+
+    $seo_meta = get_term_meta($term_id, $seo_meta_key, true);
+    if (!is_array($seo_meta)) {
+        $seo_meta = [];
+    }
+
+    $display_meta = get_term_meta($term_id, $display_meta_key, true);
+    if (!is_array($display_meta)) {
+        $display_meta = [];
+    }
+
+    $merged_meta = array_merge($seo_meta, $display_meta);
+
+    $config = onav_get_api_meta_config();
+    $allowed_fields = isset($config['taxonomies'][$taxonomy]) ? $config['taxonomies'][$taxonomy] : [];
+    $final_meta = [];
+
+    foreach (array_keys($allowed_fields) as $field_key) {
+        $final_meta[$field_key] = isset($merged_meta[$field_key]) ? $merged_meta[$field_key] : '';
+    }
+
+    return $final_meta;
+}
+
+/**
+ * UPDATE 回调: 更新分类/标签 meta (已修复, 支持序列化)
+ */
+function onav_update_term_meta_callback($value, $term_object, $key) {
+    $term_id = $term_object->term_id;
+    $taxonomy = $term_object->taxonomy;
+
+    if (!current_user_can('edit_term', $term_id)) {
+        return new WP_Error('rest_forbidden_context', __('Sorry, you are not allowed to edit this term.', 'onav-rest-api'), ['status' => 403]);
+    }
+
+    if (!is_array($value)) {
+        return new WP_Error('rest_invalid_data', __('Invalid data format. Expecting an object of meta fields.', 'onav-rest-api'), ['status' => 400]);
+    }
+
+    $config = onav_get_api_meta_config();
+    $allowed_fields = isset($config['taxonomies'][$taxonomy]) ? $config['taxonomies'][$taxonomy] : [];
+
+    $seo_field_keys = ['seo_title', 'seo_metakey', 'seo_desc'];
+    $display_field_keys = ['thumbnail', 'card_mode', 'columns'];
+
+    $seo_meta_key = 'term_io_seo';
+    $display_meta_key = 'term_io_' . $taxonomy;
+
+    $current_seo_meta = get_term_meta($term_id, $seo_meta_key, true);
+    if (!is_array($current_seo_meta)) $current_seo_meta = [];
+
+    $current_display_meta = get_term_meta($term_id, $display_meta_key, true);
+    if (!is_array($current_display_meta)) $current_display_meta = [];
+
+    $seo_updated = false;
+    $display_updated = false;
+
+    foreach ($value as $field_key => $field_value) {
+        if (array_key_exists($field_key, $allowed_fields)) {
+            $field_config = $allowed_fields[$field_key];
+            $sanitized_value = onav_sanitize_meta_value($field_value, $field_config);
+
+            if (in_array($field_key, $seo_field_keys)) {
+                $current_seo_meta[$field_key] = $sanitized_value;
+                $seo_updated = true;
+            } elseif (in_array($field_key, $display_field_keys)) {
+                $current_display_meta[$field_key] = $sanitized_value;
+                $display_updated = true;
+            }
+        }
+    }
+
+    if ($seo_updated) {
+        update_term_meta($term_id, $seo_meta_key, $current_seo_meta);
+    }
+    if ($display_updated) {
+        update_term_meta($term_id, $display_meta_key, $current_display_meta);
+    }
+
+    return true;
+}
+
+
+/**
+ * 递归清理 meta 数据
+ */
+function onav_sanitize_meta_value($value, $config) {
+    $type = isset($config['type']) ? $config['type'] : 'string';
+
+    if (is_array($value) && in_array($type, ['array', 'object'])) {
+        $sanitized_array = [];
+        foreach ($value as $key => $item) {
+            $item_config = ['type' => is_array($item) ? 'array' : 'string'];
+            $sanitized_array[$key] = onav_sanitize_meta_value($item, $item_config);
+        }
+        return $sanitized_array;
+    }
+
+    switch ($type) {
+        case 'url':
+            return esc_url_raw($value);
+        case 'textarea':
+            return sanitize_textarea_field($value);
+        case 'integer':
+            return intval($value);
+        case 'boolean':
+            return rest_sanitize_boolean($value);
+        case 'string':
+        default:
+            return sanitize_text_field($value);
+    }
+}
+
+//======================================================================
+// 4. 后台设置页面
+//======================================================================
+
+add_action('admin_menu', 'onav_rest_api_add_admin_menu');
+add_action('admin_init', 'onav_rest_api_settings_init');
+
+/**
+ * 添加后台菜单
+ */
+function onav_rest_api_add_admin_menu() {
+    add_options_page(
+        'OneNav REST API Settings',
+        'OneNav REST API',
+        'manage_options',
+        'onenav_rest_api',
+        'onav_rest_api_options_page'
     );
 }
 
 /**
- * 验证并清理 meta 输入 - sites 类型
+ * 注册设置
  */
-add_filter('rest_pre_insert_sites', 'onav_validate_meta_input_sites', 10, 2);
+function onav_rest_api_settings_init() {
+    register_setting('onavRestApi', 'onav_rest_api_settings');
 
-function onav_validate_meta_input_sites($prepared_post, $request) {
-    // $prepared_post 是 WP_Post 对象，不是数组
-    if (is_object($prepared_post)) {
-        $prepared_post = get_object_vars($prepared_post);
+    add_settings_section(
+        'onav_rest_api_section_post_types',
+        __('启用文章类型', 'onav-rest-api'),
+        null,
+        'onavRestApi'
+    );
+
+    add_settings_section(
+        'onav_rest_api_section_taxonomies',
+        __('启用分类法', 'onav-rest-api'),
+        null,
+        'onavRestApi'
+    );
+
+    $config = onav_get_api_meta_config();
+    $options = get_option('onav_rest_api_settings');
+
+    // 为文章类型创建复选框
+    foreach (array_keys($config['post_types']) as $post_type) {
+        add_settings_field(
+            'enabled_post_types_' . $post_type,
+            $post_type,
+            'onav_rest_api_checkbox_callback',
+            'onavRestApi',
+            'onav_rest_api_section_post_types',
+            [
+                'option_name' => 'enabled_post_types',
+                'value' => $post_type,
+                'options' => $options
+            ]
+        );
     }
-    if (isset($request['onav_meta']) && is_array($request['onav_meta'])) {
-        $meta = $request['onav_meta'];
-        $cleaned_meta = array();
-        foreach ($meta as $key => $value) {
-            // 验证字段名
-            $allowed_fields = onav_get_allowed_meta_fields();
-            if (array_key_exists($key, $allowed_fields)) {
-                // 根据字段类型进行清理
-                switch ($key) {
-                    case '_sites_link':
-                    case '_sites_preview':
-                        // URL 字段
-                        $cleaned_meta[$key] = esc_url_raw($value);
-                        break;
-                    case '_seo_desc':
-                    case '_sites_sescribe':
-                        // 描述字段（允许更多字符）
-                        $cleaned_meta[$key] = sanitize_textarea_field($value);
-                        break;
-                    default:
-                        // 默认文本清理
-                        $cleaned_meta[$key] = sanitize_text_field($value);
-                }
-            }
-        }
-        // 将清理后的 meta 存储到 post meta
-        if (!empty($cleaned_meta)) {
-            // 使用 meta_input 数组格式
-            $prepared_post['meta_input'] = $cleaned_meta;
-        }
+
+    // 为分类法创建复选框
+    foreach (array_keys($config['taxonomies']) as $taxonomy) {
+        add_settings_field(
+            'enabled_taxonomies_' . $taxonomy,
+            $taxonomy,
+            'onav_rest_api_checkbox_callback',
+            'onavRestApi',
+            'onav_rest_api_section_taxonomies',
+            [
+                'option_name' => 'enabled_taxonomies',
+                'value' => $taxonomy,
+                'options' => $options
+            ]
+        );
     }
-    // 返回转换后的数组（WP_REST_Posts_Controller 需要数组）
-    return (object) $prepared_post;
 }
 
 /**
- * 验证并清理 meta 输入 - post 类型
+ * 渲染复选框的回调函数
  */
-add_filter('rest_pre_insert_post', 'onav_validate_meta_input_post', 10, 2);
+function onav_rest_api_checkbox_callback($args) {
+    $option_name = $args['option_name'];
+    $value = $args['value'];
+    $options = $args['options'];
 
-function onav_validate_meta_input_post($prepared_post, $request) {
-    // $prepared_post 是 WP_Post 对象，不是数组
-    if (is_object($prepared_post)) {
-        $prepared_post = get_object_vars($prepared_post);
+    // 如果选项从未保存过，则默认全部勾选
+    if (empty($options)) {
+        $checked = 'checked';
+    } else {
+        $checked = isset($options[$option_name]) && in_array($value, $options[$option_name]) ? 'checked' : '';
     }
-    
-    // 处理 onav_meta 中的 SEO 字段
-    if (isset($request['onav_meta']) && is_array($request['onav_meta'])) {
-        $meta = $request['onav_meta'];
-        $cleaned_meta = array();
-        foreach ($meta as $key => $value) {
-            // 处理 SEO 相关字段
-            $seo_fields = array('_seo_metakey', '_seo_title', '_seo_desc');
-            if (in_array($key, $seo_fields)) {
-                switch ($key) {
-                    case '_seo_desc':
-                        $cleaned_meta[$key] = sanitize_textarea_field($value);
-                        break;
-                    default:
-                        $cleaned_meta[$key] = sanitize_text_field($value);
-                }
-            }
-        }
-        if (!empty($cleaned_meta)) {
-            $prepared_post['meta_input'] = $cleaned_meta;
-        }
-    }
-    
-    // 处理 post_excerpt（摘要字段）
-    if (isset($request['post_excerpt'])) {
-        $prepared_post['excerpt'] = sanitize_textarea_field($request['post_excerpt']);
-    }
-    
-    // 处理 _thumbnail_id（特色图片）
-    if (isset($request['_thumbnail_id'])) {
-        $prepared_post['featured_media'] = intval($request['_thumbnail_id']);
-    }
-    
-    // 返回转换后的数组
-    return (object) $prepared_post;
+
+    echo "<input type='checkbox' name='onav_rest_api_settings[{$option_name}][]' value='{$value}' {$checked} />";
+}
+
+/**
+ * 渲染设置页面的 HTML
+ */
+function onav_rest_api_options_page() {
+    ?>
+    <div class="wrap">
+        <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
+        <form action="options.php" method="post">
+            <?php
+            settings_fields('onavRestApi');
+            do_settings_sections('onavRestApi');
+            submit_button();
+            ?>
+        </form>
+    </div>
+    <?php
 }
