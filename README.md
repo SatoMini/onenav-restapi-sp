@@ -4,6 +4,7 @@
 本插件主要目的是达成：OpenClaw + WordPress + OneNav 主题：打造 AI 自动化网址发布的导航网站
 
 参考文章说明初始篇：https://warpnav.com/openclaw-wp-onenav
+
 进阶篇：https://warpnav.com/openclaw-onenav-rest-api
 
 ### 1、这是个什么插件？
