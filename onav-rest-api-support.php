@@ -3,7 +3,7 @@
  * Plugin Name: OneNav REST API Meta Fields Support
  * Plugin URI: https://warpnav.com/
  * Description: 为 OneNav 主题的所有自定义文章类型和分类法提供完整的自定义字段（meta）REST API 读写支持，并提供后台开关控制。
- * Version: 2.1.1
+ * Version: 2.1.2
  * Author: WarpNav
  * Author URI: https://warpnav.com/
  * Text Domain: onav-rest-api
@@ -53,7 +53,11 @@ function onav_register_rest_routes() {
     // 2. 根据设置注册分类法的 meta 字段
     foreach ($enabled_taxonomies as $taxonomy) {
         if (isset($config['taxonomies'][$taxonomy])) {
-            register_rest_field($taxonomy, 'onav_meta', [
+            // WordPress REST tags endpoint uses the object type "tag", while
+            // the actual taxonomy name remains "post_tag" in callbacks.
+            $rest_object_type = ($taxonomy === 'post_tag') ? 'tag' : $taxonomy;
+
+            register_rest_field($rest_object_type, 'onav_meta', [
                 'get_callback'    => 'onav_get_term_meta_callback',
                 'update_callback' => 'onav_update_term_meta_callback',
                 'schema'          => null,
